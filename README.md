@@ -1,6 +1,6 @@
 ---
 title: SZL Real Estate
-emoji: "⌂"
+emoji: "🏠"
 colorFrom: blue
 colorTo: gray
 sdk: docker
