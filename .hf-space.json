@@ -1,0 +1,7 @@
+{
+  "space": "SZLHOLDINGS/szl-real-estate",
+  "sdk": "docker",
+  "port": 7860,
+  "status": "ROADMAP",
+  "note": "Hub push requires HF_TOKEN in org secrets. GitHub is canonical. Occupancy UNAVAILABLE. Not an MLS."
+}
