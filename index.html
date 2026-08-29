@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SZL Real Estate</title>
+  <style>
+    body { margin:0; background:#070b12; color:#e8e4d9; font:15px/1.5 ui-sans-serif,system-ui,sans-serif; }
+    main { max-width:800px; margin:0 auto; padding:32px 20px 80px; }
+    h1 { font-weight:500; letter-spacing:-.03em; }
+    .quiet { color:#8b93a7; }
+    select, textarea, button { width:100%; font:inherit; background:#101824; color:#e8e4d9; border:1px solid #243044; padding:10px 12px; margin:8px 0; }
+    button { background:#e8e4d9; color:#0b1f3a; font-weight:600; cursor:pointer; }
+    pre { white-space:pre-wrap; background:#101824; border:1px solid #243044; padding:16px; font:12px ui-monospace,Menlo,monospace; }
+    .chip { display:inline-block; border:1px solid #243044; padding:4px 8px; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#8b93a7; margin-right:6px; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="quiet">FIFTH VERTICAL · NOT AN MLS</p>
+  <h1>Public records. No fabricated occupancy.</h1>
+  <p><span class="chip">Occupancy UNAVAILABLE</span><span class="chip">Actuation ROADMAP</span><span class="chip">STRUCTURAL-ONLY</span></p>
+  <p class="quiet">Zillow owns listings. We own assessor + FEMA + tract ACS RATE. Nassau has no PLUTO.</p>
+  <label for="id">Parcel</label>
+  <select id="id">
+    <option value="R-BK-11">Brooklyn · R-BK-11 · PLUTO live</option>
+    <option value="R-QN-19">Queens · R-QN-19 · PLUTO live</option>
+    <option value="R-NS-04">Nassau · R-NS-04 · no PLUTO</option>
+  </select>
+  <textarea id="signal" rows="2">Underwrite this parcel on public records only.</textarea>
+  <button type="button" id="go">Seal underwriting receipt</button>
+  <pre id="out">idle</pre>
+</main>
+<script>
+document.getElementById("go").onclick = async () => {
+  const r = await fetch("/api/underwrite", { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ id: document.getElementById("id").value, signal: document.getElementById("signal").value }) });
+  document.getElementById("out").textContent = JSON.stringify(await r.json(), null, 2);
+};
+</script>
+</body>
+</html>
