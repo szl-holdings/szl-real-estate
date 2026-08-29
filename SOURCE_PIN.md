@@ -12,6 +12,7 @@ This repository is a **thin adapter**. It does not own Decision Assurance produc
 | formula authority | NONE |
 | Λ | Conjecture 1 / ADVISORY_CONJECTURAL |
 | a11oy PR | https://github.com/szl-holdings/a11oy/pull/1438 |
+| a11oy main | `2b67b63624a3f4bf35787cfa5260d7960f1a76d5` |
 | a11oy parent | `60154ba5d752139493f3e2d2971668a6d56e61c2` |
 
 Not an MLS. Not a certified valuation. Not an offer, listing, or close engine.
