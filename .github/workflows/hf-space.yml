@@ -21,7 +21,8 @@ jobs:
           token = os.environ.get("HF_TOKEN") or ""
           if not token:
               print("HF_TOKEN UNAVAILABLE — Space publish skipped. Not fabricated LIVE.")
-              sys.exit(0)
+              print("::error::HF_TOKEN / HF_ORG_TOKEN is not set — Space publish cannot run. A mirror that cannot write must not report success.")
+              sys.exit(1)
           from huggingface_hub import HfApi, create_repo
           api = HfApi(token=token)
           create_repo("SZLHOLDINGS/szl-real-estate", repo_type="space", space_sdk="docker", exist_ok=True, token=token)
