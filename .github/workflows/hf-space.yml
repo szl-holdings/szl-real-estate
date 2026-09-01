@@ -98,8 +98,19 @@ jobs:
           if not sha_pattern.fullmatch(source_sha) or not sha_pattern.fullmatch(central_sha):
               raise SystemExit('source identities must be exact 40-character commit SHAs')
 
-          forbidden_local = ('secrets.HF_', 'reusable-hf-deploy.yml@')
-          present = [item for item in forbidden_local if item in source_text]
+          forbidden_patterns = {
+              'local Hugging Face provider secret': re.compile(
+                  r'(?m)^\s+HF_TOKEN:\s*\$\{\{\s*secrets\.HF_'
+              ),
+              'caller-scoped reusable provider publisher': re.compile(
+                  r'(?m)^\s+uses:\s*szl-holdings/\.github/\.github/workflows/'
+                  r'reusable-hf-deploy\.yml@'
+              ),
+          }
+          present = [
+              name for name, pattern in forbidden_patterns.items()
+              if pattern.search(source_text)
+          ]
           if present:
               raise SystemExit(f'caller still attempts provider publication: {present!r}')
 
