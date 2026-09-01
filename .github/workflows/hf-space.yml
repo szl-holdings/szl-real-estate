@@ -1,36 +1,50 @@
-name: hf-space
+# Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
+name: Hugging Face publication pipeline
+
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/hf-space.yml
+      - Dockerfile
+      - app.py
+      - index.html
+      - requirements.txt
+      - README.md
+      - szl_re/**
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: hf-deploy-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    name: Validate publisher caller (no provider write)
+    if: github.event_name == 'pull_request'
+    uses: szl-holdings/.github/.github/workflows/reusable-workflow-lint.yml@c889276e51e7d954c4bba8b216f86fc7577721fa
+    with:
+      fail-on-zizmor-warning: false
+
   publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.12"
-      - run: pip install huggingface_hub
-      - name: Push Docker Space SZLHOLDINGS/szl-real-estate
-        env:
-          HF_TOKEN: ${{ secrets.HF_ORG_TOKEN || secrets.HF_TOKEN }}
-        run: |
-          python - <<'PY'
-          import os, sys
-          token = os.environ.get("HF_TOKEN") or ""
-          if not token:
-              print("HF_TOKEN UNAVAILABLE — Space publish skipped. Not fabricated LIVE.")
-              print("::error::HF_TOKEN / HF_ORG_TOKEN is not set — Space publish cannot run. A mirror that cannot write must not report success.")
-              sys.exit(1)
-          from huggingface_hub import HfApi, create_repo
-          api = HfApi(token=token)
-          create_repo("SZLHOLDINGS/szl-real-estate", repo_type="space", space_sdk="docker", exist_ok=True, token=token)
-          api.upload_folder(
-              folder_path=".",
-              repo_id="SZLHOLDINGS/szl-real-estate",
-              repo_type="space",
-              ignore_patterns=[".git*", "tests/*", ".venv/*"],
-          )
-          print("published SZLHOLDINGS/szl-real-estate")
-          PY
+    name: Publish exact source and attest live state
+    if: github.event_name != 'pull_request'
+    uses: szl-holdings/.github/.github/workflows/reusable-hf-deploy.yml@c889276e51e7d954c4bba8b216f86fc7577721fa
+    with:
+      hf-repo: SZLHOLDINGS/szl-real-estate
+      ref: ${{ github.sha }}
+      dockerfile-path: Dockerfile
+      include-readme: true
+      prune: true
+      require-default-branch-tip: true
+      restart-space: true
+      wait-running: 1200
+      smoke-paths: '["/"]'
+    secrets:
+      HF_TOKEN: ${{ secrets.HF_ORG_TOKEN || secrets.HF_ORG_TOKEN1 || secrets.HF_TOKEN || secrets.HF_WRITE_TOKEN }}
