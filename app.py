@@ -10,12 +10,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from szl_re.underwrite import PARCELS, run_parcel
+from szl_space_brain import anatomy, substrate_status
 
 ROOT = Path(__file__).resolve().parent
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "szl-real-estate/0.1"
+    server_version = "szl-real-estate/0.2"
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
@@ -34,6 +35,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
         self._cors()
         self.end_headers()
         self.wfile.write(raw)
@@ -41,8 +43,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path.rstrip("/") or "/"
         if path in {"/healthz", "/readyz"}:
-            body = json.dumps({"ok": True, "occupancy": "UNAVAILABLE", "proven_trust": False}).encode()
+            brain = substrate_status()
+            body = json.dumps({
+                "ok": not brain["missing"],
+                "occupancy": "UNAVAILABLE",
+                "proven_trust": False,
+                "second_brain": "LIVE" if not brain["missing"] else "DEGRADED",
+                "locked_proven_count": brain["locked_proven_count"],
+                "lambda": "Conjecture 1 OPEN",
+            }).encode()
             self._send(200, body, "application/json")
+            return
+        if path == "/api/second-brain":
+            self._send(200, json.dumps(anatomy("szl-real-estate"), indent=2).encode(), "application/json")
+            return
+        if path == "/api/formulas":
+            self._send(200, json.dumps(substrate_status(), indent=2).encode(), "application/json")
             return
         if path == "/api/parcels":
             self._send(200, json.dumps({"ok": True, "parcels": list(PARCELS)}).encode(), "application/json")
@@ -66,11 +82,14 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError:
             data = {}
+        if path != "/api/underwrite":
+            self._send(404, json.dumps({"ok": False}).encode(), "application/json")
+            return
         rec = run_parcel(str(data.get("id") or "R-BK-11"), str(data.get("signal") or ""))
         self._send(200, json.dumps(rec, indent=2, default=str).encode(), "application/json")
 
 
 if __name__ == "__main__":
     port = 7860
-    print(f"[szl-real-estate] 0.0.0.0:{port} · occupancy UNAVAILABLE", file=sys.stderr)
+    print(f"[szl-real-estate] 0.0.0.0:{port} · second-brain governed runtime", file=sys.stderr)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
