@@ -1,0 +1,8 @@
+/* Public Experience Frontier v4 — additive interaction contract. */
+html,body{max-inline-size:100%;overflow-x:clip}
+:where(button,[role="button"],a[class*="btn"],input,select,textarea,summary){min-block-size:44px;touch-action:manipulation}
+:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:3px solid currentColor;outline-offset:3px}
+@media (max-width:767px){:where(input:not([type="checkbox"]):not([type="radio"]),select,textarea){font-size:max(16px,1em)}}
+@media (pointer:coarse){:where(button,[role="button"],a[class*="btn"],summary){min-block-size:48px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
+@supports(padding:max(0px)){body{padding-inline:max(0px,env(safe-area-inset-left,0px)) max(0px,env(safe-area-inset-right,0px))}}
