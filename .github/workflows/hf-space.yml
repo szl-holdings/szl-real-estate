@@ -65,7 +65,7 @@ jobs:
         env:
           EXPECTED_REPO: szl-real-estate
           EXPECTED_HF_REPO: SZLHOLDINGS/szl-real-estate
-          EXPECTED_SMOKE_PATHS: '["/"]'
+          EXPECTED_SMOKE_PATHS: '["/","/healthz","/api/second-brain","/api/formulas"]'
           SOURCE_WORKFLOW: .github/workflows/hf-space.yml
         run: |
           set -euo pipefail
