@@ -14,6 +14,8 @@
     pre { white-space:pre-wrap; background:#101824; border:1px solid #243044; padding:16px; font:12px ui-monospace,Menlo,monospace; }
     .chip { display:inline-block; border:1px solid #243044; padding:4px 8px; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#8b93a7; margin-right:6px; }
   </style>
+  <meta name="szl-space-slug" content="terra" data-szl-space-holo-v2="true" />
+  <link rel="stylesheet" href="./szl-space-hologram.css" data-szl-space-holo-v2="style" />
 </head>
 <body>
 <main>
@@ -38,5 +40,6 @@ document.getElementById("go").onclick = async () => {
   document.getElementById("out").textContent = JSON.stringify(await r.json(), null, 2);
 };
 </script>
+  <script src="./szl-space-hologram.js" defer data-szl-space-holo-v2="script"></script>
 </body>
 </html>
