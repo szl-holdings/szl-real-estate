@@ -1,7 +1,7 @@
 {
-  "space": "SZLHOLDINGS/szl-real-estate",
+  "space": "SZLHOLDINGS/terra",
   "sdk": "docker",
   "port": 7860,
-  "status": "ROADMAP",
-  "note": "Hub push requires HF_TOKEN in org secrets. GitHub is canonical. Occupancy UNAVAILABLE. Not an MLS."
+  "status": "CANONICAL_SURFACE",
+  "note": "GitHub is the product source. The protected A11oy publisher owns the canonical Terra presentation; this repo has no provider credential. Occupancy UNAVAILABLE. Not an MLS."
 }
