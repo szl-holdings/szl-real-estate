@@ -1,10 +1,10 @@
 # Copyright 2026 SZL Holdings — SPDX-License-Identifier: Apache-2.0
-name: Verify central Hugging Face publication ownership
+name: Verify canonical Terra publication ownership
 
-# Provider writes belong to the protected szl-holdings/.github publisher because
-# reusable workflows inherit the caller repository's secret scope. This workflow
-# never handles provider credentials; it proves the central lane still owns this
-# exact source/target pair and emits an immutable delegation receipt.
+# This repository is Terra's canonical product source, but it is not a provider
+# writer. The protected A11oy publisher owns the one canonical Hub surface named
+# by the organization estate contract. This workflow proves that three-way
+# delegation and emits an immutable receipt without handling provider secrets.
 on:
   push:
     branches: [main]
@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/hf-space.yml
+      - .hf-space.json
       - Dockerfile
       - app.py
       - index.html
@@ -24,13 +25,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: hf-central-delegation-${{ github.repository }}-${{ github.ref }}
+  group: hf-terra-delegation-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: Verify central exact-source publisher contract
-    runs-on: ubuntu-latest
+    name: Verify canonical Terra surface owner
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Harden runner
@@ -38,7 +39,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout exact source event
+      - name: Checkout exact product source event
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -46,7 +47,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout current protected publication owner
+      - name: Checkout current protected estate governance
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: szl-holdings/.github
@@ -55,18 +56,32 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Checkout current protected runtime publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/a11oy
+          ref: main
+          path: publisher
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Set up exact Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.10"
 
-      - name: Prove delegation and emit receipt
+      - name: Prove governance and publisher delegation
         shell: bash
         env:
-          EXPECTED_REPO: szl-real-estate
-          EXPECTED_HF_REPO: SZLHOLDINGS/szl-real-estate
-          EXPECTED_SMOKE_PATHS: '["/","/healthz","/api/second-brain","/api/formulas"]'
+          EXPECTED_PRODUCT_REPO: szl-holdings/szl-real-estate
+          EXPECTED_PRODUCT_URL: https://github.com/szl-holdings/szl-real-estate
+          EXPECTED_PUBLISHER_REPO: szl-holdings/a11oy
+          EXPECTED_HF_REPO: SZLHOLDINGS/terra
           SOURCE_WORKFLOW: .github/workflows/hf-space.yml
+          GOVERNANCE_CONTRACT: estate/alignment.v1.json
+          PUBLISHER_WORKFLOW: .github/workflows/hf-sync.yml
+          PUBLISHER_ENTRYPOINT: scripts/hf_publish_vertical_flagships_v4.py
+          PUBLISHER_IMPLEMENTATION: scripts/hf_publish_vertical_flagships_v4_impl.py
         run: |
           set -euo pipefail
           mkdir -p evidence
@@ -80,85 +95,171 @@ jobs:
           import subprocess
           from pathlib import Path
 
-          repo = os.environ['EXPECTED_REPO']
+          product_repo = os.environ['EXPECTED_PRODUCT_REPO']
+          product_url = os.environ['EXPECTED_PRODUCT_URL']
+          publisher_repo = os.environ['EXPECTED_PUBLISHER_REPO']
           hf_repo = os.environ['EXPECTED_HF_REPO']
-          smoke = os.environ['EXPECTED_SMOKE_PATHS']
+
           source_workflow = Path('source') / os.environ['SOURCE_WORKFLOW']
-          central_workflow = Path('governance/.github/workflows/publish-operator-spaces.yml')
+          governance_contract = Path('governance') / os.environ['GOVERNANCE_CONTRACT']
+          publisher_workflow = Path('publisher') / os.environ['PUBLISHER_WORKFLOW']
+          publisher_entrypoint = Path('publisher') / os.environ['PUBLISHER_ENTRYPOINT']
+          publisher_implementation = (
+              Path('publisher') / os.environ['PUBLISHER_IMPLEMENTATION']
+          )
 
           source_text = source_workflow.read_text(encoding='utf-8')
-          central_text = central_workflow.read_text(encoding='utf-8')
-          source_sha = subprocess.check_output(
-              ['git', '-C', 'source', 'rev-parse', '--verify', 'HEAD'], text=True
-          ).strip()
-          central_sha = subprocess.check_output(
-              ['git', '-C', 'governance', 'rev-parse', '--verify', 'HEAD'], text=True
-          ).strip()
-          sha_pattern = re.compile(r'^[0-9a-f]{40}$')
-          if not sha_pattern.fullmatch(source_sha) or not sha_pattern.fullmatch(central_sha):
-              raise SystemExit('source identities must be exact 40-character commit SHAs')
+          governance_text = governance_contract.read_text(encoding='utf-8')
+          publisher_workflow_text = publisher_workflow.read_text(encoding='utf-8')
+          publisher_entrypoint_text = publisher_entrypoint.read_text(encoding='utf-8')
+          publisher_implementation_text = publisher_implementation.read_text(
+              encoding='utf-8'
+          )
+          governance = json.loads(governance_text)
 
-          forbidden_patterns = {
+          def exact_sha(checkout: str) -> str:
+              value = subprocess.check_output(
+                  ['git', '-C', checkout, 'rev-parse', '--verify', 'HEAD'],
+                  text=True,
+              ).strip()
+              if not re.fullmatch(r'[0-9a-f]{40}', value):
+                  raise SystemExit(f'{checkout} identity is not an exact commit SHA')
+              return value
+
+          source_sha = exact_sha('source')
+          governance_sha = exact_sha('governance')
+          publisher_sha = exact_sha('publisher')
+
+          forbidden_source_patterns = {
               'local Hugging Face provider secret': re.compile(
-                  r'(?m)^\s+HF_TOKEN:\s*\$\{\{\s*secrets\.HF_'
+                  r'(?m)^\s+HF_(?:ORG_|WRITE_)?TOKEN:\s*\$\{\{\s*secrets\.'
               ),
-              'caller-scoped reusable provider publisher': re.compile(
+              'caller-scoped reusable provider writer': re.compile(
                   r'(?m)^\s+uses:\s*szl-holdings/\.github/\.github/workflows/'
                   r'reusable-hf-deploy\.yml@'
               ),
           }
           present = [
-              name for name, pattern in forbidden_patterns.items()
+              name
+              for name, pattern in forbidden_source_patterns.items()
               if pattern.search(source_text)
           ]
           if present:
-              raise SystemExit(f'caller still attempts provider publication: {present!r}')
+              raise SystemExit(f'product source still attempts provider writes: {present!r}')
 
-          required_global = (
-              'schedule:',
-              "if: github.event_name != 'pull_request'",
-              '--require-default-branch-tip',
-              '--restart-space',
-              '--attest',
-              '--wait-running 1200',
-              'secrets.HF_ORG_TOKEN',
-              'secrets.HF_ORG_TOKEN1',
-              'secrets.HF_TOKEN',
-              'secrets.HF_WRITE_TOKEN',
-          )
-          missing = [item for item in required_global if item not in central_text]
-          if missing:
-              raise SystemExit(f'central publisher controls missing: {missing!r}')
-          if 'environment: production' in central_text:
-              raise SystemExit('central publisher is stalled behind a duplicate environment review')
+          if governance.get('schema') != 'szl.estate.alignment/v1':
+              raise SystemExit('unexpected estate governance schema')
+          bodies = [
+              body
+              for body in governance.get('public_bodies', [])
+              if isinstance(body, dict) and body.get('id') == 'terra'
+          ]
+          if len(bodies) != 1:
+              raise SystemExit(f'expected one governed Terra body, observed {len(bodies)}')
+          terra = bodies[0]
+          expected_terra = {
+              'backend_source': product_repo,
+              'presentation_source': product_repo,
+              'hub_surface': hf_repo,
+              'domain': 'real-estate',
+          }
+          drift = {
+              key: {'expected': expected, 'observed': terra.get(key)}
+              for key, expected in expected_terra.items()
+              if terra.get(key) != expected
+          }
+          if drift:
+              raise SystemExit(f'Terra estate contract drifted: {drift!r}')
+          if governance.get('authority', {}).get('governed_fabric') != publisher_repo:
+              raise SystemExit('A11oy is not the governed publication fabric')
+          aliases = governance.get('hub_alias_policy', {})
+          if aliases.get('duplicate_authority_spaces_forbidden') is not True:
+              raise SystemExit('duplicate Hub authority is not forbidden')
+          if 'terra' not in aliases.get('canonical_public_space_slugs', []):
+              raise SystemExit('Terra is absent from canonical Hub slugs')
 
-          entry = re.compile(
-              rf'-\s+repo:\s*{re.escape(repo)}\s*\n'
-              rf'\s+hf_repo:\s*{re.escape(hf_repo)}\s*\n'
-              rf"\s+smoke_paths:\s*'{re.escape(smoke)}'"
+          required_workflow = (
+              'push:',
+              'branches: [main]',
+              'publish-vertical-flagships:',
+              'scripts/hf_exact_main_ownership.py',
+              'python scripts/hf_publish_vertical_flagships_v4.py',
+              'hf-vertical-flagships-receipt.json',
+              'HF_ORG_TOKEN: ${{ secrets.HF_ORG_TOKEN }}',
+              'HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}',
+              'HF_TOKEN: ${{ secrets.HF_TOKEN }}',
           )
-          if not entry.search(central_text):
-              raise SystemExit(f'central publisher does not own {repo} -> {hf_repo}')
+          missing_workflow = [
+              fragment
+              for fragment in required_workflow
+              if fragment not in publisher_workflow_text
+          ]
+          if missing_workflow:
+              raise SystemExit(
+                  f'canonical A11oy publisher controls missing: {missing_workflow!r}'
+              )
+          if 'environment: production' in publisher_workflow_text:
+              raise SystemExit('canonical publisher has a duplicate environment review')
+
+          if 'hf_publish_vertical_flagships_v4_impl' not in publisher_entrypoint_text:
+              raise SystemExit('publisher entrypoint no longer delegates to reviewed implementation')
+          required_implementation = (
+              'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
+              '"slug": "terra"',
+              f'"source": "{product_url}"',
+              'TERRA_FORGE_MARKER',
+              'load_terra_forge_bundle()',
+              '"schema":"szl.build-info/v1"',
+              '"schema":"szl.vertical-shell-deployment/v1"',
+              '"hf_repository": rid',
+          )
+          missing_implementation = [
+              fragment
+              for fragment in required_implementation
+              if fragment not in publisher_implementation_text
+          ]
+          if missing_implementation:
+              raise SystemExit(
+                  f'canonical Terra implementation controls missing: '
+                  f'{missing_implementation!r}'
+              )
 
           receipt = {
-              'schema': 'szl.hf.central-delegation.v1',
-              'state': 'DELEGATED',
-              'source_repository': f'szl-holdings/{repo}',
-              'source_sha': source_sha,
-              'publisher_repository': 'szl-holdings/.github',
-              'publisher_sha': central_sha,
-              'publisher_workflow': '.github/workflows/publish-operator-spaces.yml',
+              'schema': 'szl.hf.canonical-surface-delegation.v2',
+              'state': 'DELEGATED_PRESENTATION',
+              'product_source_repository': product_repo,
+              'product_source_sha': source_sha,
+              'governance_repository': 'szl-holdings/.github',
+              'governance_sha': governance_sha,
+              'governance_contract': os.environ['GOVERNANCE_CONTRACT'],
+              'governance_contract_sha256': hashlib.sha256(
+                  governance_text.encode()
+              ).hexdigest(),
+              'publisher_repository': publisher_repo,
+              'publisher_sha': publisher_sha,
+              'publisher_workflow': os.environ['PUBLISHER_WORKFLOW'],
+              'publisher_workflow_sha256': hashlib.sha256(
+                  publisher_workflow_text.encode()
+              ).hexdigest(),
+              'publisher_entrypoint': os.environ['PUBLISHER_ENTRYPOINT'],
+              'publisher_entrypoint_sha256': hashlib.sha256(
+                  publisher_entrypoint_text.encode()
+              ).hexdigest(),
+              'publisher_implementation': os.environ['PUBLISHER_IMPLEMENTATION'],
+              'publisher_implementation_sha256': hashlib.sha256(
+                  publisher_implementation_text.encode()
+              ).hexdigest(),
               'hf_repository': hf_repo,
-              'smoke_paths': json.loads(smoke),
-              'source_workflow_sha256': hashlib.sha256(source_text.encode()).hexdigest(),
-              'publisher_workflow_sha256': hashlib.sha256(central_text.encode()).hexdigest(),
+              'product_source_url': product_url,
               'provider_credentials_local': False,
-              'default_tip_guard_required': True,
-              'restart_required': True,
-              'live_attestation_required': True,
+              'product_source_bytes_published_by_owner': False,
+              'duplicate_authority_space_forbidden': True,
+              'exact_publisher_main_guard_required': True,
+              'live_deployment_receipt_required': True,
           }
-          Path('evidence/hf-central-delegation.json').write_text(
-              json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          Path('evidence/hf-canonical-terra-delegation.json').write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
           )
           print(json.dumps(receipt, indent=2, sort_keys=True))
           PY
@@ -167,7 +268,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hf-central-delegation-${{ github.sha }}
-          path: evidence/hf-central-delegation.json
+          name: hf-canonical-terra-delegation-${{ github.sha }}
+          path: evidence/hf-canonical-terra-delegation.json
           if-no-files-found: error
           retention-days: 90
