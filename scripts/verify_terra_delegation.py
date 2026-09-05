@@ -136,6 +136,11 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
         "HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}",
         "HF_TOKEN: ${{ secrets.HF_TOKEN }}",
     ), "canonical publisher workflow")
+    # Preserve the pre-refactor negative control as well as the required
+    # positive controls. A second production-environment review can stall the
+    # canonical publisher even when all of its required steps are present.
+    if "environment: production" in workflow_text:
+        raise ValueError("canonical publisher has a duplicate environment review")
     require_fragments(publisher_files[PUBLISHER_ENTRYPOINT].decode("utf-8"), (
         "hf_publish_vertical_flagships_v4_impl",
     ), "publisher entrypoint")

@@ -148,6 +148,17 @@ class DelegationTests(unittest.TestCase):
         self.assertNotIn("paths:", workflow)
         self.assertIn("source/scripts/verify_terra_delegation.py", workflow)
 
+    def test_duplicate_publisher_environment_review_fails(self):
+        workflow = self.publisher / verifier.PUBLISHER_WORKFLOW
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8")
+            + "\n    environment: production\n",
+            encoding="utf-8",
+        )
+        with patch.object(verifier, "exact_sha", return_value="a" * 40):
+            with self.assertRaisesRegex(ValueError, "duplicate environment review"):
+                verifier.verify(self.source, self.governance, self.publisher)
+
     def test_uncommitted_checkout_cannot_be_pinned(self):
         with patch.object(verifier.subprocess, "check_output", side_effect=["a" * 40, " M file"]):
             with self.assertRaisesRegex(ValueError, "uncommitted"):
