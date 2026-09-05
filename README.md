@@ -13,9 +13,12 @@ short_description: Public-records underwriting. Not an MLS.
 # szl-real-estate
 
 
-## Packet 8 source pin
+## Source and presentation ownership
 
-Terra Assurance product logic lives in canonical [`szl-holdings/a11oy/verticals/terra`](https://github.com/szl-holdings/a11oy/tree/main/verticals/terra).
+The Terra product source is this repository. The shared Assurance core lives in
+[`szl-holdings/a11oy/verticals/terra`](https://github.com/szl-holdings/a11oy/tree/main/verticals/terra).
+Current ownership is documented in [SOURCE_PIN.md](SOURCE_PIN.md); the delegation
+artifact records exact commits for each verification run.
 
 - Kernel: [`verticals/_kernel/a11oy_kernel.py`](https://github.com/szl-holdings/a11oy/blob/main/verticals/_kernel/a11oy_kernel.py)
 - Canonical Hugging Face surface: [SZLHOLDINGS/terra](https://huggingface.co/spaces/SZLHOLDINGS/terra)
@@ -23,8 +26,7 @@ Terra Assurance product logic lives in canonical [`szl-holdings/a11oy/verticals/
   the presentation runtime and links it back here; source bytes and deployed
   runtime bytes are deliberately reported as separate identities.
 - Formula authority: **NONE**. Models, formulas and market signals never authorize.
-- Canonical land PR: [szl-holdings/a11oy#1438](https://github.com/szl-holdings/a11oy/pull/1438)
-- Canonical land SHA: [`2b67b63624a3f4bf35787cfa5260d7960f1a76d5`](https://github.com/szl-holdings/a11oy/commit/2b67b63624a3f4bf35787cfa5260d7960f1a76d5)
+- Historical Assurance core introduction: [szl-holdings/a11oy#1438](https://github.com/szl-holdings/a11oy/pull/1438)
 
 
 The fifth vertical. Zillow / CoStar / HouseCanary own listings. SZL owns public assessor + FEMA letter + tract ACS RATE.
@@ -38,8 +40,11 @@ The fifth vertical. Zillow / CoStar / HouseCanary own listings. SZL owns public 
 - The local `hf-space` workflow performs no provider write. It verifies the
   organization estate contract, the current protected A11oy publisher, and the
   single canonical `SZLHOLDINGS/terra` target, then emits a hash-addressed
-  delegation receipt. Runtime state still requires a separate live deployment
-  receipt and provider readback.
+  delegation receipt. The scan inventories every source workflow and rejects
+  secret references and recognized provider write declarations. Its static
+  patterns do not prove arbitrary called code cannot write. Runtime state still
+  requires a separate live deployment receipt and provider readback; this
+  product source remains `LINKED_NOT_PUBLISHED`.
 
 Not affiliated with Zillow, CoStar, or HouseCanary. Not a Zestimate.
 
