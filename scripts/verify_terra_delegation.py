@@ -21,6 +21,7 @@ GOVERNANCE_CONTRACT = "estate/alignment.v1.json"
 PUBLISHER_WORKFLOW = ".github/workflows/hf-sync.yml"
 PUBLISHER_ENTRYPOINT = "scripts/hf_publish_vertical_flagships_v4.py"
 PUBLISHER_IMPLEMENTATION = "scripts/hf_publish_vertical_flagships_v4_impl.py"
+PUBLISHER_BASE_IMPLEMENTATION = "scripts/_hf_publish_vertical_flagships_v4_impl_base.py"
 PRESENTATION_SOURCE = PUBLISHER_REPO + ":" + PUBLISHER_IMPLEMENTATION
 
 
@@ -124,7 +125,12 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
     validate_governance(json.loads(governance_data))
     publisher_files = {
         path: (publisher / path).read_bytes()
-        for path in (PUBLISHER_WORKFLOW, PUBLISHER_ENTRYPOINT, PUBLISHER_IMPLEMENTATION)
+        for path in (
+            PUBLISHER_WORKFLOW,
+            PUBLISHER_ENTRYPOINT,
+            PUBLISHER_IMPLEMENTATION,
+            PUBLISHER_BASE_IMPLEMENTATION,
+        )
     }
     workflow_text = publisher_files[PUBLISHER_WORKFLOW].decode("utf-8")
     require_fragments(workflow_text, (
@@ -144,12 +150,30 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
     require_fragments(publisher_files[PUBLISHER_ENTRYPOINT].decode("utf-8"), (
         "hf_publish_vertical_flagships_v4_impl",
     ), "publisher entrypoint")
+
+    # The current A11oy publisher is a narrow policy overlay over an immutable
+    # renderer base. Prove that the public entry implementation still binds the
+    # exact base, preserves Terra forge identity, and delegates Terra rendering
+    # and publication execution to that base rather than reimplementing them.
     require_fragments(publisher_files[PUBLISHER_IMPLEMENTATION].decode("utf-8"), (
+        '"_hf_publish_vertical_flagships_v4_impl_base.py"',
+        'if getattr(_BASE, "TERRA_FORGE_MARKER", None) !=',
+        'if getattr(_BASE, "TERRA_FORGE_GENERATOR", None) != "szl-vertical-forge/0.2.2"',
+        '_sentra if row.get("slug") == "sentra" else row for row in _rows',
+        "return _BASE.load_terra_forge_bundle()",
+        "return int(_BASE.main())",
+    ), "canonical Terra overlay")
+
+    # The deployment and Terra source controls now live in the immutable base.
+    # Bind that file into the receipt instead of pretending they are present in
+    # the overlay itself.
+    require_fragments(publisher_files[PUBLISHER_BASE_IMPLEMENTATION].decode("utf-8"), (
         'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
         '"slug": "terra"', f'"source": "{PRODUCT_URL}"', "TERRA_FORGE_MARKER",
-        "load_terra_forge_bundle()", '"schema":"szl.build-info/v1"',
+        "def load_terra_forge_bundle()", '"schema":"szl.build-info/v1"',
         '"schema":"szl.vertical-shell-deployment/v1"', '"hf_repository": rid',
-    ), "canonical Terra implementation")
+    ), "canonical Terra base implementation")
+
     receipt = {
         "schema": "szl.hf.canonical-surface-delegation.v3",
         "state": "DELEGATED_PRESENTATION",

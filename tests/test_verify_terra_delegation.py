@@ -54,9 +54,18 @@ class DelegationTests(unittest.TestCase):
         self.put(self.publisher, verifier.PUBLISHER_ENTRYPOINT,
                  "from hf_publish_vertical_flagships_v4_impl import main")
         self.put(self.publisher, verifier.PUBLISHER_IMPLEMENTATION, "\n".join((
+            'BASE_IMPLEMENTATION_PATH = Path(__file__).with_name(',
+            '"_hf_publish_vertical_flagships_v4_impl_base.py"',
+            'if getattr(_BASE, "TERRA_FORGE_MARKER", None) !=',
+            'if getattr(_BASE, "TERRA_FORGE_GENERATOR", None) != "szl-vertical-forge/0.2.2"',
+            '_sentra if row.get("slug") == "sentra" else row for row in _rows',
+            "return _BASE.load_terra_forge_bundle()",
+            "return int(_BASE.main())",
+        )))
+        self.put(self.publisher, verifier.PUBLISHER_BASE_IMPLEMENTATION, "\n".join((
             'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
             '"slug": "terra"', f'"source": "{verifier.PRODUCT_URL}"',
-            "TERRA_FORGE_MARKER", "load_terra_forge_bundle()",
+            "TERRA_FORGE_MARKER", "def load_terra_forge_bundle()",
             '"schema":"szl.build-info/v1"',
             '"schema":"szl.vertical-shell-deployment/v1"', '"hf_repository": rid',
         )))
@@ -79,6 +88,33 @@ class DelegationTests(unittest.TestCase):
         self.assertEqual(receipt["publisher_sha"], "c" * 40)
         self.assertIs(receipt["product_source_bytes_published_by_owner"], False)
         self.assertEqual(receipt["live_runtime_state"], "NOT_CHECKED")
+        self.assertIn(verifier.PUBLISHER_BASE_IMPLEMENTATION, receipt["publisher_files_sha256"])
+
+    def test_overlay_must_delegate_terra_to_bound_base(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        overlay.write_text(
+            overlay.read_text(encoding="utf-8").replace(
+                "return _BASE.load_terra_forge_bundle()",
+                "return load_terra_forge_bundle()",
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(verifier, "exact_sha", return_value="a" * 40):
+            with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
+                verifier.verify(self.source, self.governance, self.publisher)
+
+    def test_base_implementation_controls_are_required(self):
+        base = self.publisher / verifier.PUBLISHER_BASE_IMPLEMENTATION
+        base.write_text(
+            base.read_text(encoding="utf-8").replace(
+                'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
+                'DEPLOYMENT_SOURCE_REPOSITORY = "other/repo"',
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(verifier, "exact_sha", return_value="a" * 40):
+            with self.assertRaisesRegex(ValueError, "canonical Terra base implementation"):
+                verifier.verify(self.source, self.governance, self.publisher)
 
     def test_other_yaml_workflow_is_inventoried(self):
         self.put(self.source, ".github/workflows/other.yaml", "name: read-only\n")
