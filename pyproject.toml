@@ -6,5 +6,18 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 
+[project.urls]
+Homepage = "https://github.com/szl-holdings/szl-real-estate"
+Source = "https://github.com/szl-holdings/szl-real-estate"
+Issues = "https://github.com/szl-holdings/szl-real-estate/issues"
+Changelog = "https://github.com/szl-holdings/szl-real-estate/releases"
+
 [tool.setuptools.packages.find]
 include = ["szl_re*"]
+
+[tool.szl.release]
+import_names = ["szl_re"] # wheel top-level import names; the release gate fails if the built wheel differs
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
