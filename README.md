@@ -31,7 +31,11 @@ artifact records exact commits for each verification run.
 
 The fifth vertical. Zillow / CoStar / HouseCanary own listings. SZL owns public assessor + FEMA letter + tract ACS RATE.
 
-- NYC PLUTO is MEASURED when the open data API answers.
+- The three selectable parcels are MODELED fixtures without validated real BBLs;
+  their PLUTO assessment remains UNAVAILABLE. Unknown or missing IDs return an
+  unresolved receipt and HTTP 404, without substituting an example.
+- NYC PLUTO is MEASURED only after one exact BBL and tract match, validated numeric
+  records, and a retained source hash. Tract samples cannot become parcel facts.
 - Nassau has no PLUTO — honesty stays UNAVAILABLE, never invented.
 - Unit occupancy is UNAVAILABLE.
 - MLS / lockbox / "list the house" fail closed.
