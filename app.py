@@ -67,10 +67,10 @@ class Handler(BaseHTTPRequestHandler):
             html = (ROOT / "index.html").read_text(encoding="utf-8")
             self._send(200, html.encode(), "text/html; charset=utf-8")
             return
-        qs = parse_qs(urlparse(self.path).query)
+        qs = parse_qs(urlparse(self.path).query, keep_blank_values=True)
         if path == "/api/underwrite":
-            rec = run_parcel(qs.get("id", ["R-BK-11"])[0], qs.get("signal", [""])[0])
-            self._send(200, json.dumps(rec, indent=2, default=str).encode(), "application/json")
+            rec = run_parcel(qs.get("id", [""])[0], qs.get("signal", [""])[0])
+            self._send(200 if rec["ok"] else 404, json.dumps(rec, indent=2, default=str).encode(), "application/json")
             return
         self._send(404, json.dumps({"ok": False}).encode(), "application/json")
 
@@ -85,8 +85,11 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/underwrite":
             self._send(404, json.dumps({"ok": False}).encode(), "application/json")
             return
-        rec = run_parcel(str(data.get("id") or "R-BK-11"), str(data.get("signal") or ""))
-        self._send(200, json.dumps(rec, indent=2, default=str).encode(), "application/json")
+        if not isinstance(data, dict):
+            self._send(400, json.dumps({"ok": False, "error": "request must be an object"}).encode(), "application/json")
+            return
+        rec = run_parcel(str(data.get("id") or ""), str(data.get("signal") or ""))
+        self._send(200 if rec["ok"] else 404, json.dumps(rec, indent=2, default=str).encode(), "application/json")
 
 
 if __name__ == "__main__":
