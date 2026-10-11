@@ -136,7 +136,7 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
     require_fragments(workflow_text, (
         "push:", "branches: [main]", "publish-vertical-flagships:",
         "scripts/hf_exact_main_ownership.py",
-        "python scripts/hf_publish_vertical_flagships_v4.py",
+        "python -I -B scripts/hf_publish_vertical_flagships_v4.py",
         "hf-vertical-flagships-receipt.json",
         "HF_ORG_TOKEN: ${{ secrets.HF_ORG_TOKEN }}",
         "HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}",

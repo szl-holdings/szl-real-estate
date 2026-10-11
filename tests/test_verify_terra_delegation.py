@@ -45,7 +45,7 @@ class DelegationTests(unittest.TestCase):
         self.put(self.publisher, verifier.PUBLISHER_WORKFLOW, "\n".join((
             "push:", "branches: [main]", "publish-vertical-flagships:",
             "scripts/hf_exact_main_ownership.py",
-            "python scripts/hf_publish_vertical_flagships_v4.py",
+            "python -I -B scripts/hf_publish_vertical_flagships_v4.py",
             "hf-vertical-flagships-receipt.json",
             "HF_ORG_TOKEN: ${{ secrets.HF_ORG_TOKEN }}",
             "HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}",
@@ -89,6 +89,22 @@ class DelegationTests(unittest.TestCase):
         self.assertIs(receipt["product_source_bytes_published_by_owner"], False)
         self.assertEqual(receipt["live_runtime_state"], "NOT_CHECKED")
         self.assertIn(verifier.PUBLISHER_BASE_IMPLEMENTATION, receipt["publisher_files_sha256"])
+
+    def test_nonisolated_or_wrong_publisher_invocation_fails(self):
+        workflow = self.publisher / verifier.PUBLISHER_WORKFLOW
+        original = workflow.read_text(encoding="utf-8")
+        expected = "python -I -B scripts/hf_publish_vertical_flagships_v4.py"
+        for replacement in (
+            "python scripts/hf_publish_vertical_flagships_v4.py",
+            "python -I scripts/hf_publish_vertical_flagships_v4.py",
+            "python -B scripts/hf_publish_vertical_flagships_v4.py",
+            "python -I -B scripts/other_publisher.py",
+        ):
+            with self.subTest(invocation=replacement):
+                workflow.write_text(original.replace(expected, replacement), encoding="utf-8")
+                with patch.object(verifier, "exact_sha", return_value="a" * 40):
+                    with self.assertRaisesRegex(ValueError, "canonical publisher workflow"):
+                        verifier.verify(self.source, self.governance, self.publisher)
 
     def test_overlay_must_delegate_terra_to_bound_base(self):
         overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
