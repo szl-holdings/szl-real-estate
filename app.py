@@ -15,6 +15,17 @@ from szl_space_brain import anatomy, substrate_status
 ROOT = Path(__file__).resolve().parent
 
 
+def _health_payload(brain: dict) -> dict:
+    return {
+        "ok": not brain["missing"],
+        "occupancy": "UNAVAILABLE",
+        "proven_trust": False,
+        "second_brain": "LIVE" if not brain["missing"] else "DEGRADED",
+        "locked_proven_count": brain["locked_proven_count"],
+        "lambda": "Conjecture 1 OPEN",
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "szl-real-estate/0.2"
 
@@ -42,17 +53,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path.rstrip("/") or "/"
-        if path in {"/healthz", "/readyz"}:
-            brain = substrate_status()
-            body = json.dumps({
-                "ok": not brain["missing"],
-                "occupancy": "UNAVAILABLE",
-                "proven_trust": False,
-                "second_brain": "LIVE" if not brain["missing"] else "DEGRADED",
-                "locked_proven_count": brain["locked_proven_count"],
-                "lambda": "Conjecture 1 OPEN",
-            }).encode()
+        if path == "/healthz":
+            # Liveness only: the process is serving. A degraded substrate is
+            # reported in the body but must not get a serving process restarted.
+            body = json.dumps(_health_payload(substrate_status())).encode()
             self._send(200, body, "application/json")
+            return
+        if path == "/readyz":
+            # Readiness: fail the probe (503) while substrate imports are missing,
+            # and name each missing module so the reason stays explicit.
+            brain = substrate_status()
+            payload = _health_payload(brain)
+            payload["ready"] = not brain["missing"]
+            payload["missing"] = [
+                {"module": item["module"], "error": item["error"]} for item in brain["missing"]
+            ]
+            self._send(200 if payload["ready"] else 503, json.dumps(payload).encode(), "application/json")
             return
         if path == "/api/second-brain":
             self._send(200, json.dumps(anatomy("szl-real-estate"), indent=2).encode(), "application/json")
