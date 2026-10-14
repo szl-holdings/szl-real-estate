@@ -44,3 +44,8 @@ updates:
       docker:
         patterns:
           - "*"
+    ignore:
+      # The image runs the Python minor that ci.yml tests (3.12). A minor or
+      # major move is a runtime change, made by hand together with ci.yml.
+      - dependency-name: "library/python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
