@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import hashlib
 import json
 import tempfile
 import unittest
@@ -53,15 +54,11 @@ class DelegationTests(unittest.TestCase):
         )))
         self.put(self.publisher, verifier.PUBLISHER_ENTRYPOINT,
                  "from hf_publish_vertical_flagships_v4_impl import main")
-        self.put(self.publisher, verifier.PUBLISHER_IMPLEMENTATION, "\n".join((
-            'BASE_IMPLEMENTATION_PATH = Path(__file__).with_name(',
-            '"_hf_publish_vertical_flagships_v4_impl_base.py"',
-            'if getattr(_BASE, "TERRA_FORGE_MARKER", None) !=',
-            'if getattr(_BASE, "TERRA_FORGE_GENERATOR", None) != "szl-vertical-forge/0.2.2"',
-            '_sentra if row.get("slug") == "sentra" else row for row in _rows',
-            "return _BASE.load_terra_forge_bundle()",
-            "return int(_BASE.main())",
-        )))
+        for target, fixture in (
+            (verifier.PUBLISHER_IMPLEMENTATION, "terra_overlay_v4.txt"),
+            (verifier.PUBLISHER_NATIVE_IMPLEMENTATION, "terra_native_v1.txt"),
+        ):
+            self.put(self.publisher, target, (ROOT / "tests/fixtures" / fixture).read_text())
         self.put(self.publisher, verifier.PUBLISHER_BASE_IMPLEMENTATION, "\n".join((
             'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
             '"slug": "terra"', f'"source": "{verifier.PRODUCT_URL}"',
@@ -69,6 +66,37 @@ class DelegationTests(unittest.TestCase):
             '"schema":"szl.build-info/v1"',
             '"schema":"szl.vertical-shell-deployment/v1"', '"hf_repository": rid',
         )))
+        self.make_forge_bundle()
+
+    def make_forge_bundle(self):
+        page = ('<html data-szl-vertical-forge="0.2.2"><a href="/panels">Panels</a>'
+                '<a href="/build-receipt.json">Receipt</a><script>const EP="/api/live";</script></html>')
+        page_hash = hashlib.sha256(page.encode()).hexdigest()
+        event = {"artifact_sha256": page_hash, "kind": "generated-index",
+                 "path": "terra/index.html", "prev_hash": "0" * 64}
+        canonical = lambda value: hashlib.sha256(json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        event["chain_hash"] = canonical(event)
+        header = {"schema": "szl.vertical-forge.receipt/v4", "generator": "szl-vertical-forge/0.2.3",
+                  "algorithm": "sha256-canonical-json-chain", "genesis": "0" * 64,
+                  "config_sha256": "a" * 64, "vertical_count": 1}
+        master = canonical({"header": header, "chain_tip": event["chain_hash"]})
+        fleet = {**header, "events": [event], "chain_tip": event["chain_hash"], "master_hash": master}
+        artifact = {"schema": "szl.vertical-forge.artifact/v1", "generator": header["generator"],
+                    "chain_event": event, "fleet_master_hash": master,
+                    "fleet_config_sha256": header["config_sha256"], "vertical": "terra"}
+        lock = {"schema": "szl.vertical-shell.source-lock/v1", "generator": header["generator"],
+                "source_repository": "szl-holdings/szl-vertical-forge", "source_revision": "b" * 40,
+                "artifact_sha256": page_hash, "fleet_master_hash": master}
+        self.put(self.publisher, verifier.TERRA_BUNDLE + "index.html", page)
+        for name, value in (("fleet-receipt.json", fleet), ("build-receipt.json", artifact),
+                            ("source-lock.json", lock)):
+            self.put(self.publisher, verifier.TERRA_BUNDLE + name, json.dumps(value))
+
+    def verify(self):
+        with patch.object(verifier, "exact_sha", return_value="a" * 40):
+            return verifier.verify(self.source, self.governance, self.publisher)
 
     @staticmethod
     def put(root, name, text):
@@ -89,6 +117,11 @@ class DelegationTests(unittest.TestCase):
         self.assertIs(receipt["product_source_bytes_published_by_owner"], False)
         self.assertEqual(receipt["live_runtime_state"], "NOT_CHECKED")
         self.assertIn(verifier.PUBLISHER_BASE_IMPLEMENTATION, receipt["publisher_files_sha256"])
+        self.assertIn(verifier.PUBLISHER_NATIVE_IMPLEMENTATION, receipt["publisher_files_sha256"])
+        self.assertEqual(receipt["forge_verification"]["state"], "STATIC_PASS")
+        self.assertEqual(receipt["forge_verification"]["live_runtime_state"], "NOT_CHECKED")
+        for name in ("index.html", "build-receipt.json", "fleet-receipt.json", "source-lock.json"):
+            self.assertIn(verifier.TERRA_BUNDLE + name, receipt["publisher_files_sha256"])
 
     def test_nonisolated_or_wrong_publisher_invocation_fails(self):
         workflow = self.publisher / verifier.PUBLISHER_WORKFLOW
@@ -106,12 +139,12 @@ class DelegationTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "canonical publisher workflow"):
                         verifier.verify(self.source, self.governance, self.publisher)
 
-    def test_overlay_must_delegate_terra_to_bound_base(self):
+    def test_overlay_must_keep_proof_controls(self):
         overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
         overlay.write_text(
             overlay.read_text(encoding="utf-8").replace(
-                "return _BASE.load_terra_forge_bundle()",
-                "return load_terra_forge_bundle()",
+                'if fleet.get("master_hash") != _forge_sha256({"chain_tip": previous, "header": header}):',
+                "if False:",
             ),
             encoding="utf-8",
         )
@@ -131,6 +164,102 @@ class DelegationTests(unittest.TestCase):
         with patch.object(verifier, "exact_sha", return_value="a" * 40):
             with self.assertRaisesRegex(ValueError, "canonical Terra base implementation"):
                 verifier.verify(self.source, self.governance, self.publisher)
+
+    def test_native_loader_must_be_restored_in_finally(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        text = overlay.read_text()
+        for replacement in (
+            "_BASE.load_terra_forge_bundle = load_terra_native_landing",
+            "_BASE.load_terra_forge_bundle = None",
+            "pass",
+        ):
+            with self.subTest(replacement=replacement):
+                overlay.write_text(text.replace(
+                    "_BASE.load_terra_forge_bundle = original_terra_loader", replacement,
+                ))
+                with self.assertRaisesRegex(ValueError, "proof controls changed"):
+                    self.verify()
+
+    def test_native_derived_hash_binding_cannot_be_removed(self):
+        native = self.publisher / verifier.PUBLISHER_NATIVE_IMPLEMENTATION
+        native.write_text(native.read_text().replace(
+            'hashlib.sha256(derived.encode()).hexdigest()', '"unverified"',
+        ))
+        with self.assertRaisesRegex(ValueError, "proof controls changed"):
+            self.verify()
+
+    def test_wrong_publisher_execution_fails(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        overlay.write_text(overlay.read_text().replace("return int(_BASE.main())", "return int(other.main())"))
+        with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
+            self.verify()
+
+    def test_forge_landing_tampering_fails(self):
+        page = self.publisher / verifier.TERRA_BUNDLE / "index.html"
+        page.write_text(page.read_text() + "tampered")
+        with self.assertRaisesRegex(ValueError, "artifact hash"):
+            self.verify()
+
+    def test_forge_receipt_tampering_fails(self):
+        mutations = (
+            ("fleet-receipt.json", lambda d: d["events"][0].update(prev_hash="e" * 64)),
+            ("fleet-receipt.json", lambda d: d["events"][0].update(chain_hash="e" * 64)),
+            ("fleet-receipt.json", lambda d: d.update(master_hash="e" * 64)),
+            ("fleet-receipt.json", lambda d: d.update(config_sha256="e" * 64)),
+            ("fleet-receipt.json", lambda d: d.update(vertical_count=2)),
+            ("fleet-receipt.json", lambda d: d.update(generator="szl-vertical-forge/0.2.2")),
+            ("source-lock.json", lambda d: d.update(source_repository="other/repo")),
+            ("source-lock.json", lambda d: d.update(source_revision="main")),
+            ("source-lock.json", lambda d: d.update(source_revision=int("1" * 40))),
+            ("source-lock.json", lambda d: d.update(artifact_sha256="e" * 64)),
+            ("build-receipt.json", lambda d: d.update(chain_event={})),
+            ("build-receipt.json", lambda d: d.update(fleet_config_sha256="e" * 64)),
+            ("build-receipt.json", lambda d: d.update(vertical="sentra")),
+        )
+        for name, mutate in mutations:
+            with self.subTest(file=name, mutate=mutate):
+                self.make_forge_bundle()
+                path = self.publisher / verifier.TERRA_BUNDLE / name
+                document = json.loads(path.read_text())
+                mutate(document)
+                path.write_text(json.dumps(document))
+                with self.assertRaisesRegex(ValueError, "Terra forge"):
+                    self.verify()
+
+    def test_comment_only_proof_cannot_satisfy_overlay_contract(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        text = overlay.read_text()
+        start = text.index("def load_terra_forge_bundle()")
+        end = text.index("def load_terra_native_landing()")
+        overlay.write_text(text[:start] + "\n".join("# " + line for line in text[start:end].splitlines())
+                           + "\n" + text[end:])
+        with self.assertRaisesRegex(ValueError, "ambiguous proof functions"):
+            self.verify()
+
+    def test_rebound_or_shadowed_proof_functions_fail(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        original = overlay.read_text()
+        for shadow in (
+            'def load_terra_native_landing():\n    return "unverified", {}',
+            '_forge_sha256 = lambda _: "forged"',
+            'from other import load_terra_forge_bundle',
+            'del load_terra_native_landing',
+            'TERRA_FORGE_RECEIPT_SCHEMA = "unverified"',
+            '_BASE.load_terra_forge_bundle = lambda: ("unverified", {})',
+            '_BASE.main = lambda: 0',
+        ):
+            with self.subTest(shadow=shadow):
+                overlay.write_text(original + "\n" + shadow + "\n")
+                with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
+                    self.verify()
+
+    def test_earlier_publisher_bypass_fails(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        overlay.write_text(overlay.read_text().replace(
+            'def main() -> int:', 'def main() -> int:\n    return int(other.main())',
+        ))
+        with self.assertRaisesRegex(ValueError, "proof controls changed"):
+            self.verify()
 
     def test_other_yaml_workflow_is_inventoried(self):
         self.put(self.source, ".github/workflows/other.yaml", "name: read-only\n")

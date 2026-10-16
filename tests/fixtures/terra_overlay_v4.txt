@@ -1,0 +1,146 @@
+# Static-only contract fixture from a11oy@58a0e102e8ebc0b35af86be3ec2de3b6c4e41d66.
+# Reviewed migrations: a11oy#2787 and #2819; never imported or executed.
+BASE_IMPLEMENTATION_PATH = Path(__file__).with_name("_hf_publish_vertical_flagships_v4_impl_base.py")
+if getattr(_BASE, "TERRA_FORGE_MARKER", None) != 'data-szl-vertical-forge="0.2.2"':
+    raise RuntimeError("immutable flagship base is not Terra forge 0.2.2")
+if getattr(_BASE, "TERRA_FORGE_GENERATOR", None) != "szl-vertical-forge/0.2.2":
+    raise RuntimeError("immutable flagship base has an unexpected Terra generator")
+_BASE.FLAGSHIPS = tuple(_sentra if row.get("slug") == "sentra" else row for row in _rows)
+TERRA_FORGE_GENERATOR = "szl-vertical-forge/0.2.3"
+TERRA_FORGE_RECEIPT_SCHEMA = "szl.vertical-forge.receipt/v4"
+TERRA_FORGE_RECEIPT_ALGORITHM = "sha256-canonical-json-chain"
+TERRA_FORGE_RECEIPT_HEADER_FIELDS = (
+    "schema", "generator", "algorithm", "genesis", "config_sha256", "vertical_count",
+)
+
+
+def _forge_sha256(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value)).hexdigest()
+
+def load_terra_forge_bundle() -> tuple[str, dict[str, Any]]:
+    """Load and independently verify the vendored forge 0.2.3 Terra artifact."""
+    _sync_contract()
+    bundle = Path(TERRA_FORGE_BUNDLE)
+    page_path = bundle / "index.html"
+    try:
+        page = page_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"missing Terra forge artifact: {page_path}") from exc
+    artifact = read_json_object(bundle / "build-receipt.json")
+    fleet = read_json_object(bundle / "fleet-receipt.json")
+    source_lock = read_json_object(bundle / "source-lock.json")
+
+    if TERRA_FORGE_MARKER not in page:
+        raise RuntimeError("Terra landing lacks the pinned forge marker")
+    for route in ('href="/panels"', 'href="/build-receipt.json"', 'const EP="/api/live"'):
+        if route not in page:
+            raise RuntimeError(f"Terra landing lacks required runtime wiring: {route}")
+    if fleet.get("schema") != TERRA_FORGE_RECEIPT_SCHEMA:
+        raise RuntimeError("Terra fleet receipt schema mismatch")
+    if artifact.get("schema") != "szl.vertical-forge.artifact/v1":
+        raise RuntimeError("Terra artifact receipt schema mismatch")
+    if source_lock.get("schema") != "szl.vertical-shell.source-lock/v1":
+        raise RuntimeError("Terra source lock schema mismatch")
+    for name, document in (("fleet", fleet), ("artifact", artifact), ("source lock", source_lock)):
+        if document.get("generator") != TERRA_FORGE_GENERATOR:
+            raise RuntimeError(f"Terra {name} generator mismatch")
+    if source_lock.get("source_repository") != TERRA_FORGE_SOURCE_REPOSITORY:
+        raise RuntimeError("Terra source repository mismatch")
+    source_revision = str(source_lock.get("source_revision") or "")
+    if len(source_revision) != 40 or any(ch not in "0123456789abcdef" for ch in source_revision):
+        raise RuntimeError("Terra forge source revision is not an exact Git SHA")
+
+    genesis = "0" * 64
+    if fleet.get("genesis") != genesis or fleet.get("algorithm") != TERRA_FORGE_RECEIPT_ALGORITHM:
+        raise RuntimeError("Terra fleet receipt header mismatch")
+    events = fleet.get("events")
+    if not isinstance(events, list) or not events or len(events) != fleet.get("vertical_count"):
+        raise RuntimeError("Terra fleet receipt event count mismatch")
+    previous = genesis
+    terra_event: dict[str, Any] | None = None
+    for position, event in enumerate(events):
+        if not isinstance(event, dict) or event.get("prev_hash") != previous:
+            raise RuntimeError(f"Terra fleet receipt link mismatch at event {position}")
+        calculated = _forge_sha256({key: value for key, value in event.items() if key != "chain_hash"})
+        if event.get("chain_hash") != calculated:
+            raise RuntimeError(f"Terra fleet receipt hash mismatch at event {position}")
+        previous = calculated
+        if event.get("path") == "terra/index.html":
+            terra_event = event
+    if fleet.get("chain_tip") != previous:
+        raise RuntimeError("Terra fleet receipt chain tip mismatch")
+    header = {field: fleet.get(field) for field in TERRA_FORGE_RECEIPT_HEADER_FIELDS}
+    if fleet.get("master_hash") != _forge_sha256({"chain_tip": previous, "header": header}):
+        raise RuntimeError("Terra fleet master hash mismatch")
+    if terra_event is None or artifact.get("chain_event") != terra_event:
+        raise RuntimeError("Terra artifact receipt is not bound into the fleet chain")
+
+    page_hash = hashlib.sha256(page.encode("utf-8")).hexdigest()
+    expected_values = {
+        "artifact_sha256": page_hash,
+        "fleet_master_hash": fleet.get("master_hash"),
+        "generator": fleet.get("generator"),
+    }
+    for field, expected in expected_values.items():
+        if source_lock.get(field) != expected:
+            raise RuntimeError(f"Terra source lock {field} mismatch")
+    if terra_event.get("artifact_sha256") != page_hash:
+        raise RuntimeError("Terra landing bytes do not match the chained artifact hash")
+    if artifact.get("fleet_master_hash") != fleet.get("master_hash"):
+        raise RuntimeError("Terra artifact receipt master hash mismatch")
+    if artifact.get("fleet_config_sha256") != fleet.get("config_sha256"):
+        raise RuntimeError("Terra artifact receipt fleet config mismatch")
+    if artifact.get("vertical") != "terra":
+        raise RuntimeError("Terra artifact receipt vertical mismatch")
+
+    forge = {
+        "schema": "szl.vertical-forge.deployment-source/v1",
+        "generator": TERRA_FORGE_GENERATOR,
+        "source_repository": TERRA_FORGE_SOURCE_REPOSITORY,
+        "source_revision": source_revision,
+        "source_pull_request": source_lock.get("source_pull_request"),
+        "fleet_master_hash": fleet["master_hash"],
+        "fleet_config_sha256": artifact.get("fleet_config_sha256"),
+        "vertical_config_sha256": artifact.get("config_sha256"),
+        "artifact_sha256": page_hash,
+        "chain_hash": terra_event["chain_hash"],
+    }
+    return page, forge
+
+def load_terra_native_landing() -> tuple[str, dict[str, Any]]:
+    return _native_module.derive_forge(*load_terra_forge_bundle())
+
+_BASE.load_terra_forge_bundle = load_terra_forge_bundle
+
+def main() -> int:
+    global _finance_upload_active, _finance_terminal_witness, _finance_source_identity
+    _sync_contract()
+    _finance_payloads.clear()
+    _finance_expected_payloads.clear()
+    _finance_witnesses.clear()
+    _finance_terminal_witness = None
+    _finance_source_identity = None
+    if any(row.get("slug") == "finance" for row in FLAGSHIPS):
+        _finance_source_identity = _finance_identity()
+        _finance_expected_payloads.update(render_finance_payloads(*_finance_source_identity))
+    publish_terra = any(row.get("slug") == "terra" for row in FLAGSHIPS)
+    original_terra_loader = _BASE.load_terra_forge_bundle
+    _finance_upload_active = True
+    if publish_terra:
+        _BASE.load_terra_forge_bundle = load_terra_native_landing
+    try:
+        return int(_BASE.main())
+    finally:
+        if publish_terra:
+            _BASE.load_terra_forge_bundle = original_terra_loader
+        _finance_upload_active = False
+
+def _sync_contract() -> None:
+    _BASE.FLAGSHIPS = tuple(FLAGSHIPS)
+    _BASE.DOMAIN_CSS = dict(DOMAIN_CSS)
+    _BASE.DOMAIN_HTML = dict(DOMAIN_HTML)
+    _BASE.APP = APP
+    _BASE.TERRA_FORGE_BUNDLE = TERRA_FORGE_BUNDLE
+    _BASE.TERRA_FORGE_MARKER = TERRA_FORGE_MARKER
+    _BASE.TERRA_FORGE_GENERATOR = TERRA_FORGE_GENERATOR
+    _BASE.TERRA_FORGE_SOURCE_REPOSITORY = TERRA_FORGE_SOURCE_REPOSITORY

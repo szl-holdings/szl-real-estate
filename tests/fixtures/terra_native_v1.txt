@@ -1,0 +1,11 @@
+# Static-only contract fixture from a11oy@58a0e102; never executed.
+def derive_forge(page: str, forge: dict) -> tuple[str, dict]:
+    """Retain the verified original chain and explicitly describe derived bytes."""
+    derived = present(page, "terra", forge=True)
+    return derived, {**forge, "presentation": {
+        "schema": VERSION,
+        "source_path": "scripts/hf_vertical_native_presentation.py",
+        "base_artifact_sha256": hashlib.sha256(page.encode()).hexdigest(),
+        "derived_landing_sha256": hashlib.sha256(derived.encode()).hexdigest(),
+        "scope": "presentation only; original Forge chain remains the base artifact",
+    }}
