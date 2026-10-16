@@ -26,20 +26,27 @@ PUBLISHER_BASE_IMPLEMENTATION = "scripts/_hf_publish_vertical_flagships_v4_impl_
 PUBLISHER_NATIVE_IMPLEMENTATION = "scripts/hf_vertical_native_presentation.py"
 TERRA_BUNDLE = "deployments/vertical-forge/terra/"
 FORGE_GENERATOR = "szl-vertical-forge/0.2.3"
+FORGE_SOURCE_REVISION = "67a3cf2d6281035af237a6f97486069a345d496b"
+# The native renderer includes its helper/constant closure, not just derive_forge.
+# Approved from a11oy@58a0e102e8ebc0b35af86be3ec2de3b6c4e41d66 (#2819).
+NATIVE_RENDERER_SHA256 = "254c1118dcb2eebbcc00f7578cc4b4df461ad2392f257c4528bb44f74a265fcb"
+NATIVE_ASSETS_SHA256 = {
+    "scripts/hf_vertical_native.css": "9433a100fa8e3e06f52cfbc328d5d9fd7b6779604bab179870c31924aa324f78",
+    "console/assets/szl/szl-design-system.css": "da310be5cbe23dfc4054d1bb07e5b37e1a62a510e43902171e217af5c1ff0ec7",
+    "console/assets/szl/SOURCE.json": "967a77235227f1d75852fb61873e46336e67403cbc0e7e12b141e31c83fbd93d",
+    "console/assets/szl/orbit-v2/szl-icon-32.svg": "6e2b7d72a3af3d9602b79de41df0194ede6496a9661f057108ec224c0efc92e6",
+    "console/assets/szl/orbit-v2/UPSTREAM.json": "074387dccc27954841cbe1f39cf8937aae5e6e0a2eba2107a7374df4fe286583",
+}
 FORGE_HEADER_FIELDS = (
     "schema", "generator", "algorithm", "genesis", "config_sha256", "vertical_count",
 )
 # Reviewed contract migrations: a11oy#2787 (forge v4) and #2819 (native landing).
-# Pin the proof functions and their execution/contract adapters.
-# A semantic change to either requires review; comments/formatting do not.
-PROOF_FUNCTIONS = {
-    "load_terra_forge_bundle": "6cdda7f523df496f8c14e684450901f0f51c99bd9e52eaa9e6c9003d9789e167",
-    "derive_forge": "45be7be008b39b8c9dd082ea533d2a26b27be009472fec2c72f67ff682b12921",
-    "_sync_contract": "2d8a7c9ed43ca9537e4f879319fdd9441bdce16cdc6a784642c5d8a901bf5c1f",
-    "_forge_sha256": "5747a18ae61aca1070ec7661108dff28c58eb667d467ddecc56f9a237b897580",
-    "load_terra_native_landing": "371f6081a918af42e02b5d834ba812299649f90f183b3bd508b295f7cc9b1af9",
-    "main": "5697ab3e294fed427343195c267b68e76a8e47e797e9198aa2f74263cbe49112",
-}
+# Bind the complete overlay AST so dynamic dispatch, reflective writes and all
+# helper dependencies remain reviewed. Comments/formatting do not affect AST.
+# The immutable base is bound byte-for-byte. Future semantic changes require a
+# new contract review, not a candidate-derived digest or a wider allowlist.
+OVERLAY_AST_SHA256 = "6e8f13d5d8abe8ead4cb43b6599c19265229a44f1ee28fdcbe0dc261f3a07ef8"
+BASE_IMPLEMENTATION_SHA256 = "2d160b98cdac57d07177aa2fce71a3413ec7201e3de76a3aa63e7193513a27a5"
 PRESENTATION_SOURCE = PUBLISHER_REPO + ":" + PUBLISHER_IMPLEMENTATION
 
 
@@ -135,54 +142,11 @@ def require_fragments(text: str, fragments: tuple[str, ...], label: str) -> None
 
 
 def verify_overlay_contract(overlay: str, native: str) -> None:
-    """Inspect reviewed proof code without importing or executing a publisher."""
-    tree = ast.parse(overlay)
-    for name in PROOF_FUNCTIONS:
-        module = ast.parse(native if name == "derive_forge" else overlay)
-        functions = [node for node in module.body
-                     if isinstance(node, ast.FunctionDef) and node.name == name]
-        bindings = [node for node in ast.walk(module) if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name
-            or isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, (ast.Store, ast.Del))
-            or isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) == name
-        )]
-        if len(functions) != 1 or len(bindings) != 1:
-            raise ValueError("canonical Terra overlay has ambiguous proof functions")
-        function = functions[0]
-        if (function.body and isinstance(function.body[0], ast.Expr)
-                and isinstance(function.body[0].value, ast.Constant)
-                and isinstance(function.body[0].value.value, str)):
-            function.body.pop(0)
-        if digest(ast.unparse(function).encode("utf-8")) != PROOF_FUNCTIONS[name]:
-            raise ValueError("canonical Terra overlay proof controls changed")
-    statements = {ast.unparse(node) for node in tree.body}
-    required = (
-        'TERRA_FORGE_GENERATOR = "szl-vertical-forge/0.2.3"',
-        'TERRA_FORGE_RECEIPT_SCHEMA = "szl.vertical-forge.receipt/v4"',
-        'TERRA_FORGE_RECEIPT_ALGORITHM = "sha256-canonical-json-chain"',
-        "TERRA_FORGE_RECEIPT_HEADER_FIELDS = " + repr(FORGE_HEADER_FIELDS),
-        "_BASE.load_terra_forge_bundle = load_terra_forge_bundle",
-        "def _forge_sha256(value: Any) -> str:\n    return hashlib.sha256(canonical_json(value)).hexdigest()",
-        "def load_terra_native_landing() -> tuple[str, dict[str, Any]]:\n    return _native_module.derive_forge(*load_terra_forge_bundle())",
-    )
-    if any(ast.unparse(ast.parse(item).body[0]) not in statements for item in required):
-        raise ValueError("canonical Terra overlay is missing required delegation controls")
-    for name in ("TERRA_FORGE_GENERATOR", "TERRA_FORGE_RECEIPT_SCHEMA",
-                 "TERRA_FORGE_RECEIPT_ALGORITHM", "TERRA_FORGE_RECEIPT_HEADER_FIELDS"):
-        if sum(isinstance(node, ast.Name) and node.id == name
-               and isinstance(node.ctx, (ast.Store, ast.Del)) for node in ast.walk(tree)) != 1:
-            raise ValueError("canonical Terra overlay has ambiguous proof constants")
-    top_level_loader_writes = [node for statement in tree.body
-                              if not isinstance(statement, ast.FunctionDef)
-                              for node in ast.walk(statement)
-                              if isinstance(node, ast.Attribute)
-                              and isinstance(node.ctx, (ast.Store, ast.Del))
-                              and ast.unparse(node) == "_BASE.load_terra_forge_bundle"]
-    if len(top_level_loader_writes) != 1 or any(
-        isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
-        and ast.unparse(node) == "_BASE.main" for node in ast.walk(tree)
-    ):
-        raise ValueError("canonical Terra overlay rebinds the canonical publisher")
+    """Inspect reviewed source without importing or executing a publisher."""
+    if digest(ast.unparse(ast.parse(overlay)).encode("utf-8")) != OVERLAY_AST_SHA256:
+        raise ValueError("canonical Terra overlay differs from the reviewed module AST")
+    if digest(native.encode("utf-8")) != NATIVE_RENDERER_SHA256:
+        raise ValueError("canonical Terra native renderer is not the reviewed dependency closure")
 
 
 def verify_forge_bundle(files: dict[str, bytes]) -> dict:
@@ -208,8 +172,12 @@ def verify_forge_bundle(files: dict[str, bytes]) -> dict:
     if (lock.get("source_repository") != "szl-holdings/szl-vertical-forge"
             or not isinstance(lock.get("source_revision"), str)
             or not re.fullmatch(r"[0-9a-f]{40}", lock["source_revision"])
-            or lock["source_revision"] == "0" * 40):
+            or lock["source_revision"] != FORGE_SOURCE_REVISION):
         raise ValueError("Terra forge source identity mismatch")
+    for value in (fleet.get("config_sha256"), artifact.get("config_sha256"),
+                  artifact.get("fleet_config_sha256")):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("Terra forge configuration digest is not SHA-256")
     if fleet.get("genesis") != "0" * 64 or fleet.get("algorithm") != "sha256-canonical-json-chain":
         raise ValueError("Terra forge chain header mismatch")
     events = fleet.get("events")
@@ -267,6 +235,7 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
             PUBLISHER_IMPLEMENTATION,
             PUBLISHER_BASE_IMPLEMENTATION,
             PUBLISHER_NATIVE_IMPLEMENTATION,
+            *NATIVE_ASSETS_SHA256,
             *(TERRA_BUNDLE + name for name in (
                 "index.html", "build-receipt.json", "fleet-receipt.json", "source-lock.json",
             )),
@@ -306,11 +275,15 @@ def verify(source: Path, governance: Path, publisher: Path) -> dict:
         publisher_files[PUBLISHER_IMPLEMENTATION].decode("utf-8"),
         publisher_files[PUBLISHER_NATIVE_IMPLEMENTATION].decode("utf-8"),
     )
+    if any(digest(publisher_files[path]) != expected for path, expected in NATIVE_ASSETS_SHA256.items()):
+        raise ValueError("canonical Terra native renderer assets changed from reviewed source")
     forge_verification = verify_forge_bundle(publisher_files)
 
-    # The deployment and Terra source controls now live in the immutable base.
-    # Bind that file into the receipt instead of pretending they are present in
-    # the overlay itself.
+    # The deployment and Terra source controls live in the immutable base.
+    # Check the reviewed bytes, including main and its helpers, before recording
+    # the digest. Required fragments alone could survive a publisher bypass.
+    if digest(publisher_files[PUBLISHER_BASE_IMPLEMENTATION]) != BASE_IMPLEMENTATION_SHA256:
+        raise ValueError("canonical Terra base implementation differs from reviewed source")
     require_fragments(publisher_files[PUBLISHER_BASE_IMPLEMENTATION].decode("utf-8"), (
         'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
         '"slug": "terra"', f'"source": "{PRODUCT_URL}"', "TERRA_FORGE_MARKER",

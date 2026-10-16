@@ -56,16 +56,12 @@ class DelegationTests(unittest.TestCase):
                  "from hf_publish_vertical_flagships_v4_impl import main")
         for target, fixture in (
             (verifier.PUBLISHER_IMPLEMENTATION, "terra_overlay_v4.txt"),
+            (verifier.PUBLISHER_BASE_IMPLEMENTATION, "terra_base_v4.txt"),
             (verifier.PUBLISHER_NATIVE_IMPLEMENTATION, "terra_native_v1.txt"),
         ):
             self.put(self.publisher, target, (ROOT / "tests/fixtures" / fixture).read_text())
-        self.put(self.publisher, verifier.PUBLISHER_BASE_IMPLEMENTATION, "\n".join((
-            'DEPLOYMENT_SOURCE_REPOSITORY = "szl-holdings/a11oy"',
-            '"slug": "terra"', f'"source": "{verifier.PRODUCT_URL}"',
-            "TERRA_FORGE_MARKER", "def load_terra_forge_bundle()",
-            '"schema":"szl.build-info/v1"',
-            '"schema":"szl.vertical-shell-deployment/v1"', '"hf_repository": rid',
-        )))
+        for path in verifier.NATIVE_ASSETS_SHA256:
+            self.put(self.publisher, path, (ROOT / "tests/fixtures/native-assets" / path).read_text())
         self.make_forge_bundle()
 
     def make_forge_bundle(self):
@@ -85,9 +81,11 @@ class DelegationTests(unittest.TestCase):
         fleet = {**header, "events": [event], "chain_tip": event["chain_hash"], "master_hash": master}
         artifact = {"schema": "szl.vertical-forge.artifact/v1", "generator": header["generator"],
                     "chain_event": event, "fleet_master_hash": master,
-                    "fleet_config_sha256": header["config_sha256"], "vertical": "terra"}
+                    "fleet_config_sha256": header["config_sha256"], "vertical": "terra",
+                    "config_sha256": "c" * 64}
         lock = {"schema": "szl.vertical-shell.source-lock/v1", "generator": header["generator"],
-                "source_repository": "szl-holdings/szl-vertical-forge", "source_revision": "b" * 40,
+                "source_repository": "szl-holdings/szl-vertical-forge",
+                "source_revision": "67a3cf2d6281035af237a6f97486069a345d496b",
                 "artifact_sha256": page_hash, "fleet_master_hash": master}
         self.put(self.publisher, verifier.TERRA_BUNDLE + "index.html", page)
         for name, value in (("fleet-receipt.json", fleet), ("build-receipt.json", artifact),
@@ -122,6 +120,8 @@ class DelegationTests(unittest.TestCase):
         self.assertEqual(receipt["forge_verification"]["live_runtime_state"], "NOT_CHECKED")
         for name in ("index.html", "build-receipt.json", "fleet-receipt.json", "source-lock.json"):
             self.assertIn(verifier.TERRA_BUNDLE + name, receipt["publisher_files_sha256"])
+        for path, digest in verifier.NATIVE_ASSETS_SHA256.items():
+            self.assertEqual(receipt["publisher_files_sha256"][path], digest)
 
     def test_nonisolated_or_wrong_publisher_invocation_fails(self):
         workflow = self.publisher / verifier.PUBLISHER_WORKFLOW
@@ -165,6 +165,17 @@ class DelegationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "canonical Terra base implementation"):
                 verifier.verify(self.source, self.governance, self.publisher)
 
+    def test_base_publisher_bypass_fails_even_with_required_markers(self):
+        base = self.publisher / verifier.PUBLISHER_BASE_IMPLEMENTATION
+        base.write_text(base.read_text() + "\nmain = lambda: 0\n")
+        with self.assertRaisesRegex(ValueError, "canonical Terra base implementation"):
+            self.verify()
+
+    def test_overlay_comments_and_formatting_preserve_reviewed_ast(self):
+        overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
+        overlay.write_text("# Editorial comment\n\n" + overlay.read_text() + "\n")
+        self.assertEqual(self.verify()["forge_verification"]["state"], "STATIC_PASS")
+
     def test_native_loader_must_be_restored_in_finally(self):
         overlay = self.publisher / verifier.PUBLISHER_IMPLEMENTATION
         text = overlay.read_text()
@@ -177,7 +188,7 @@ class DelegationTests(unittest.TestCase):
                 overlay.write_text(text.replace(
                     "_BASE.load_terra_forge_bundle = original_terra_loader", replacement,
                 ))
-                with self.assertRaisesRegex(ValueError, "proof controls changed"):
+                with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
                     self.verify()
 
     def test_native_derived_hash_binding_cannot_be_removed(self):
@@ -185,7 +196,7 @@ class DelegationTests(unittest.TestCase):
         native.write_text(native.read_text().replace(
             'hashlib.sha256(derived.encode()).hexdigest()', '"unverified"',
         ))
-        with self.assertRaisesRegex(ValueError, "proof controls changed"):
+        with self.assertRaisesRegex(ValueError, "native renderer"):
             self.verify()
 
     def test_wrong_publisher_execution_fails(self):
@@ -211,6 +222,7 @@ class DelegationTests(unittest.TestCase):
             ("source-lock.json", lambda d: d.update(source_repository="other/repo")),
             ("source-lock.json", lambda d: d.update(source_revision="main")),
             ("source-lock.json", lambda d: d.update(source_revision=int("1" * 40))),
+            ("source-lock.json", lambda d: d.update(source_revision="1" * 40)),
             ("source-lock.json", lambda d: d.update(artifact_sha256="e" * 64)),
             ("build-receipt.json", lambda d: d.update(chain_event={})),
             ("build-receipt.json", lambda d: d.update(fleet_config_sha256="e" * 64)),
@@ -233,7 +245,7 @@ class DelegationTests(unittest.TestCase):
         end = text.index("def load_terra_native_landing()")
         overlay.write_text(text[:start] + "\n".join("# " + line for line in text[start:end].splitlines())
                            + "\n" + text[end:])
-        with self.assertRaisesRegex(ValueError, "ambiguous proof functions"):
+        with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
             self.verify()
 
     def test_rebound_or_shadowed_proof_functions_fail(self):
@@ -247,6 +259,18 @@ class DelegationTests(unittest.TestCase):
             'TERRA_FORGE_RECEIPT_SCHEMA = "unverified"',
             '_BASE.load_terra_forge_bundle = lambda: ("unverified", {})',
             '_BASE.main = lambda: 0',
+            '_BASE = other',
+            'del _BASE',
+            'from other import _BASE',
+            '_native_module = other',
+            'del _native_module',
+            'from other import _native_module',
+            '_native_module.present = lambda *args, **kwargs: "unreviewed"',
+            '_native_module.derive_forge = lambda *args: ("unreviewed", {})',
+            '_native_spec.loader = other',
+            'setattr(_BASE, "main", lambda: 0)',
+            'globals()["_BASE"] = other',
+
         ):
             with self.subTest(shadow=shadow):
                 overlay.write_text(original + "\n" + shadow + "\n")
@@ -258,8 +282,54 @@ class DelegationTests(unittest.TestCase):
         overlay.write_text(overlay.read_text().replace(
             'def main() -> int:', 'def main() -> int:\n    return int(other.main())',
         ))
-        with self.assertRaisesRegex(ValueError, "proof controls changed"):
+        with self.assertRaisesRegex(ValueError, "canonical Terra overlay"):
             self.verify()
+
+    def test_native_renderer_dependency_changes_fail(self):
+        native = self.publisher / verifier.PUBLISHER_NATIVE_IMPLEMENTATION
+        original = native.read_text()
+        for change in (
+            original + '\npresent = lambda page, *args, **kwargs: "unverified"\n',
+            original.replace('derived = present(page, "terra", forge=True)', 'derived = page'),
+            original + '\nVERSION = "unreviewed"\n',
+        ):
+            with self.subTest(change=change[-80:]):
+                native.write_text(change)
+                with self.assertRaisesRegex(ValueError, "native renderer"):
+                    self.verify()
+
+    def test_native_renderer_asset_changes_fail(self):
+        for path in verifier.NATIVE_ASSETS_SHA256:
+            with self.subTest(path=path):
+                asset = self.publisher / path
+                original = asset.read_bytes()
+                asset.write_bytes(original + b"changed")
+                with self.assertRaisesRegex(ValueError, "native renderer assets"):
+                    self.verify()
+                asset.write_bytes(original)
+
+    def test_self_consistent_receipt_with_invalid_configuration_digest_fails(self):
+        for value in (None, False, 123, "g" * 64, "a" * 63, "a" * 65):
+            with self.subTest(value=value):
+                self.make_forge_bundle()
+                root = self.publisher / verifier.TERRA_BUNDLE
+                fleet = json.loads((root / "fleet-receipt.json").read_text())
+                artifact = json.loads((root / "build-receipt.json").read_text())
+                lock = json.loads((root / "source-lock.json").read_text())
+                fleet["config_sha256"] = value
+                header = {key: fleet[key] for key in verifier.FORGE_HEADER_FIELDS}
+                master = hashlib.sha256(json.dumps(
+                    {"chain_tip": fleet["chain_tip"], "header": header},
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                ).encode()).hexdigest()
+                fleet["master_hash"] = master
+                artifact.update(fleet_config_sha256=value, fleet_master_hash=master)
+                lock["fleet_master_hash"] = master
+                for filename, document in (("fleet-receipt.json", fleet),
+                                            ("build-receipt.json", artifact), ("source-lock.json", lock)):
+                    (root / filename).write_text(json.dumps(document))
+                with self.assertRaisesRegex(ValueError, "configuration digest"):
+                    self.verify()
 
     def test_other_yaml_workflow_is_inventoried(self):
         self.put(self.source, ".github/workflows/other.yaml", "name: read-only\n")
