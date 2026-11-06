@@ -67,3 +67,5 @@ Not affiliated with Zillow, CoStar, or HouseCanary. Not a Zestimate.
 
 Canonical GitHub: [szl-holdings/szl-real-estate](https://github.com/szl-holdings/szl-real-estate).
 Operator kernel: [szl-holdings/szl-sovereign-os](https://github.com/szl-holdings/szl-sovereign-os).
+
+Estate on Hugging Face: models, datasets and Spaces are published under the [SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) org.
